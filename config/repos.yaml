@@ -1,0 +1,31 @@
+repos:
+  - name: vscode
+    url: https://github.com/microsoft/vscode
+    label_allowlist:
+      - bug
+      - needs-more-info
+      - duplicate
+    owner_map:
+      "src/vs/workbench/": "@microsoft/vscode"
+      "src/vs/platform/": "@microsoft/vscode"
+    indexed_sha: null
+
+  - name: flask
+    url: https://github.com/pallets/flask
+    label_allowlist:
+      - bug
+      - needs clarification
+      - duplicate
+    owner_map:
+      "src/flask/": "@pallets"
+    indexed_sha: null
+
+  - name: fastapi
+    url: https://github.com/fastapi/fastapi
+    label_allowlist:
+      - bug
+      - feature
+      - duplicate
+    owner_map:
+      "fastapi/": "@tiangolo"
+    indexed_sha: null
