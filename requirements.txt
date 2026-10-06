@@ -5,4 +5,10 @@ tenacity
 transformers
 torch
 accelerate
+langchain
+langchain-huggingface
 huggingface_hub
+redis
+rq
+fastapi
+uvicorn

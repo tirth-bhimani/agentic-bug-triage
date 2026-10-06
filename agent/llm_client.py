@@ -5,7 +5,7 @@ from langchain_core.messages import HumanMessage
 
 load_dotenv()
 
-MODEL_NAME = os.environ.get("HF_MODEL", "microsoft/Phi-3-mini-4k-instruct")
+MODEL_NAME = os.environ.get("HF_MODEL", "Qwen/Qwen3-8B-MLX-4bit")
 
 print(f"Loading {MODEL_NAME} via LangChain (first run downloads weights)...")
 
