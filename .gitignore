@@ -5,3 +5,5 @@ __pycache__/
 eval/golden.json
 
 trace.db
+cache/
+eval/issue_cache.json

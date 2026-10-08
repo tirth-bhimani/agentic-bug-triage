@@ -3,6 +3,7 @@ pyyaml
 python-dotenv
 tenacity
 transformers
+bitsandbytes
 torch
 accelerate
 langchain
