@@ -1,13 +1,11 @@
 repos:
-  - name: vscode
-    url: https://github.com/microsoft/vscode
+  - name: markupsafe
+    url: https://github.com/pallets/markupsafe
     label_allowlist:
       - bug
-      - needs-more-info
       - duplicate
     owner_map:
-      "src/vs/workbench/": "@microsoft/vscode"
-      "src/vs/platform/": "@microsoft/vscode"
+      "src/markupsafe/": "@pallets"
     indexed_sha: null
 
   - name: flask

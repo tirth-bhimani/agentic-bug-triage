@@ -152,5 +152,17 @@ def get_top_level_dirs(owner, repo):
     data = _get(f"/repos/{owner}/{repo}/contents")
     return sorted(
         i["name"] for i in data
-        if i["type"] == "dir" and not i["name"].startswith(".")
+        if i["type"] == "dir" and i["name"] != ".git"
+    )
+
+
+def get_component_dirs(owner, repo):
+    """Return repository component names, including root files and hidden dirs."""
+    return ["root", *get_top_level_dirs(owner, repo)]
+
+
+def get_issue_comments(owner, repo, issue_number):
+    return _get(
+        f"/repos/{owner}/{repo}/issues/{issue_number}/comments",
+        params={"per_page": 100},
     )
