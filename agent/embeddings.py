@@ -15,13 +15,13 @@ EMBED_CACHE = ROOT / "cache" / "embed"
 EMBED_CACHE.mkdir(parents=True, exist_ok=True)
 
 MODEL = os.environ.get("HF_EMBED_MODEL", "Qwen/Qwen3-Embedding-0.6B")
-# Qwen embeddings are used when a Hugging Face token is available. The local
-# feature-hashing fallback keeps indexing usable when the provider has no credits.
-EMBED_MODE = os.environ.get("HF_EMBED_MODE", "remote").lower()
+# Local feature hashing avoids paid inference-provider requests. Set
+# HF_EMBED_MODE=remote only when remote embedding credits are available.
+EMBED_MODE = os.environ.get("HF_EMBED_MODE", "local").lower()
 LOCAL_MODEL = "local-feature-hash-v1"
 LOCAL_DIM = 384
 HF_TOKEN = os.environ.get("HF_TOKEN")
-# Set HF_EMBED_MODE=local to force the dependency-free fallback.
+# Set HF_EMBED_MODE=remote to opt into the hosted embedding model.
 client = InferenceClient(model=MODEL, token=HF_TOKEN) if HF_TOKEN and EMBED_MODE != "local" else None
 
 MAX_CHARS = 1500

@@ -55,7 +55,7 @@ def _get_local_model():
     return _local_model, _local_tokenizer
 
 
-def _call_local(prompt):
+def _call_local(prompt, max_tokens=300):
     import torch
 
     model, tokenizer = _get_local_model()
@@ -68,7 +68,7 @@ def _call_local(prompt):
     with torch.inference_mode():
         output = model.generate(
             **inputs,
-            max_new_tokens=300,
+            max_new_tokens=max_tokens,
             do_sample=False,
             pad_token_id=tokenizer.eos_token_id,
         )
@@ -76,13 +76,13 @@ def _call_local(prompt):
     return tokenizer.decode(generated, skip_special_tokens=True).strip()
 
 
-def call_llm(prompt):
+def call_llm(prompt, max_tokens=300):
     if LLM_MODE == "local":
-        return _call_local(prompt)
+        return _call_local(prompt, max_tokens=max_tokens)
     if LLM_MODE == "remote":
         response = _get_remote_client().chat_completion(
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=300,
+            max_tokens=max_tokens,
             temperature=0,
         )
         return response.choices[0].message.content.strip()

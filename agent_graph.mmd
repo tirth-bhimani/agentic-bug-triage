@@ -1,0 +1,27 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	precheck(precheck)
+	decide(decide)
+	run_tool(run_tool)
+	finish(finish)
+	exit(exit)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> precheck;
+	decide -.-> exit;
+	decide -.-> finish;
+	decide -.-> run_tool;
+	finish --> exit;
+	precheck -.-> decide;
+	precheck -.-> exit;
+	run_tool --> decide;
+	exit --> __end__;
+	decide -.-> decide;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
+

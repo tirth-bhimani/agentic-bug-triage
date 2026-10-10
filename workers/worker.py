@@ -10,7 +10,7 @@ from config.db import trace
 from workers.job_queue import move_to_dlq
 from agent.classifier import classify_issue
 from agent.signals import extract_signals
-
+from agent.agent_graph import run_agent
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def process_issue(repo, issue_number, title, body):
@@ -32,6 +32,10 @@ def process_issue(repo, issue_number, title, body):
         result = classify_issue(title, body, components, signals)
         trace(run_id, repo, issue_number, "classify", output_data=result)
         print(f"Processing {repo}#{issue_number}: {title}")
+        
+
+        outcome = run_agent(run_id, repo, issue_number, title, body, signals, result)
+        print(f"Agent: {outcome['status']} ({outcome['reason']}) calls={outcome['calls']}")
 
         latency_ms = int((time.time() - start) * 1000)
         trace(run_id, repo, issue_number, "completed",
