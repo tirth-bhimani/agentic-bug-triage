@@ -1,130 +1,91 @@
 import hashlib
-import os
-import re
 from pathlib import Path
 
 import numpy as np
-from dotenv import load_dotenv
-from huggingface_hub import InferenceClient
-from huggingface_hub.errors import HfHubHTTPError
-
-load_dotenv()
+import torch
+from huggingface_hub import snapshot_download
+from transformers import AutoModel, AutoTokenizer
 
 ROOT = Path(__file__).resolve().parents[1]
+MODEL_ID = "Qwen/Qwen3-Embedding-0.6B"
+MODEL_PATH = ROOT / "models" / "Qwen3-Embedding-0.6B"
 EMBED_CACHE = ROOT / "cache" / "embed"
 EMBED_CACHE.mkdir(parents=True, exist_ok=True)
 
-MODEL = os.environ.get("HF_EMBED_MODEL", "Qwen/Qwen3-Embedding-0.6B")
-# Local feature hashing avoids paid inference-provider requests. Set
-# HF_EMBED_MODE=remote only when remote embedding credits are available.
-EMBED_MODE = os.environ.get("HF_EMBED_MODE", "local").lower()
-LOCAL_MODEL = "local-feature-hash-v1"
-LOCAL_DIM = 384
-HF_TOKEN = os.environ.get("HF_TOKEN")
-# Set HF_EMBED_MODE=remote to opt into the hosted embedding model.
-client = InferenceClient(model=MODEL, token=HF_TOKEN) if HF_TOKEN and EMBED_MODE != "local" else None
-
 MAX_CHARS = 1500
 BATCH = 16
-_remote_disabled = EMBED_MODE == "local" or client is None
-_warned_local = False
+_model = None
+_tokenizer = None
 
 
-def _matrix(arr):
-    a = np.asarray(arr, dtype="float32")
-    if a.ndim == 3:            # token-level output -> mean pool
-        a = a.mean(axis=1)
-    if a.ndim == 1:
-        a = a.reshape(1, -1)
-    return a
+def _get_model():
+    global _model, _tokenizer
+    if _model is None:
+        if not MODEL_PATH.is_dir():
+            print(f"Downloading {MODEL_ID} to {MODEL_PATH}...")
+            snapshot_download(repo_id=MODEL_ID, local_dir=MODEL_PATH)
+
+        _tokenizer = AutoTokenizer.from_pretrained(
+            MODEL_PATH, local_files_only=True
+        )
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype = torch.float16 if device == "cuda" else torch.float32
+        _model = AutoModel.from_pretrained(
+            MODEL_PATH, local_files_only=True, torch_dtype=dtype
+        ).to(device)
+        _model.eval()
+    return _model, _tokenizer
 
 
-def _local_embed_one(text):
-    """Create a stable, dependency-free vector when the remote provider is unavailable."""
-    vector = np.zeros(LOCAL_DIM, dtype="float32")
-    tokens = re.findall(r"[a-z0-9_]+", text.lower())
-    features = tokens + [
-        text.lower()[i:i + 3]
-        for i in range(max(0, len(text) - 2))
-        if not text[i:i + 3].isspace()
-    ]
-    for feature in features:
-        digest = hashlib.blake2b(feature.encode("utf-8"), digest_size=8).digest()
-        bucket = int.from_bytes(digest[:4], "little") % LOCAL_DIM
-        vector[bucket] += 1.0 if digest[4] & 1 else -1.0
-    return vector
-
-
-def _local_embed_batch(texts):
-    return np.stack([_local_embed_one(text) for text in texts])
-
-
-def _disable_remote(exc):
-    global _remote_disabled, _warned_local
-    _remote_disabled = True
-    if not _warned_local:
-        print(f"Hugging Face embeddings unavailable ({exc}); using local feature hashing.")
-        _warned_local = True
-
-
-def _embed_one(text):
-    if _remote_disabled:
-        return _local_embed_one(text)
-    try:
-        return _matrix(client.feature_extraction(text))[0]
-    except HfHubHTTPError as exc:
-        _disable_remote(exc)
-        return _local_embed_one(text)
+def _normalize(vectors):
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return vectors / norms
 
 
 def _embed_batch(texts):
-    if _remote_disabled:
-        return _local_embed_batch(texts)
-    try:
-        m = _matrix(client.feature_extraction(texts))
-        if m.shape[0] == len(texts):
-            return m
-    except HfHubHTTPError as exc:
-        _disable_remote(exc)
-        return _local_embed_batch(texts)
-    except (TypeError, ValueError):
-        pass
-    return np.stack([_embed_one(t) for t in texts])
-
-
-def _normalize(m):
-    n = np.linalg.norm(m, axis=1, keepdims=True)
-    n[n == 0] = 1.0
-    return m / n
+    model, tokenizer = _get_model()
+    inputs = tokenizer(
+        texts,
+        padding=True,
+        truncation=True,
+        max_length=MAX_CHARS,
+        return_tensors="pt",
+    )
+    inputs = {key: value.to(model.device) for key, value in inputs.items()}
+    with torch.inference_mode():
+        hidden = model(**inputs).last_hidden_state
+        mask = inputs["attention_mask"].unsqueeze(-1)
+        pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+    return pooled.float().cpu().numpy()
 
 
 def _path(text):
-    model_key = LOCAL_MODEL if _remote_disabled else MODEL
-    h = hashlib.sha256(f"{model_key}|{text}".encode("utf-8")).hexdigest()[:32]
-    return EMBED_CACHE / f"{h}.npy"
+    digest = hashlib.sha256(f"{MODEL_ID}|{text}".encode("utf-8")).hexdigest()[:32]
+    return EMBED_CACHE / f"{digest}.npy"
 
 
 def embed_texts(texts):
-    """Returns an (n, d) float32 matrix of L2-normalised vectors. Disk-cached per text."""
-    texts = [t[:MAX_CHARS] or " " for t in texts]
+    """Return an (n, d) matrix of normalized local-model embeddings."""
+    texts = [text[:MAX_CHARS] or " " for text in texts]
     out = [None] * len(texts)
     todo = []
-    for i, t in enumerate(texts):
-        p = _path(t)
-        if p.exists():
-            out[i] = np.load(p)
+    for index, text in enumerate(texts):
+        path = _path(text)
+        if path.exists():
+            out[index] = np.load(path)
         else:
-            todo.append(i)
+            todo.append(index)
 
-    for s in range(0, len(todo), BATCH):
-        idxs = todo[s:s + BATCH]
-        vecs = _normalize(_embed_batch([texts[i] for i in idxs]))
-        for i, v in zip(idxs, vecs):
-            np.save(_path(texts[i]), v)
-            out[i] = v
+    for start in range(0, len(todo), BATCH):
+        indexes = todo[start:start + BATCH]
+        vectors = _normalize(_embed_batch([texts[i] for i in indexes]))
+        for index, vector in zip(indexes, vectors):
+            np.save(_path(texts[index]), vector)
+            out[index] = vector
     return np.stack(out)
 
 
 if __name__ == "__main__":
-    m = embed_texts(["hello world", "goodbye world"])
-    print("embedding OK, shape:", m.shape)
+    result = embed_texts(["hello world", "goodbye world"])
+    print("embedding OK, shape:", result.shape)

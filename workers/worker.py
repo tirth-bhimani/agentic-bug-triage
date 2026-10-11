@@ -37,6 +37,16 @@ def process_issue(repo, issue_number, title, body):
         outcome = run_agent(run_id, repo, issue_number, title, body, signals, result)
         print(f"Agent: {outcome['status']} ({outcome['reason']}) calls={outcome['calls']}")
 
+        if outcome["status"] == "ok":
+            from agent.report import synthesize
+            from config.db import trace as _t
+            rep = synthesize(run_id, repo, title, outcome, signals, result)
+            _t(run_id, repo, issue_number, "verify", output_data=rep["verifier"])
+            _t(run_id, repo, issue_number, "report",
+               output_data={"markdown": rep["markdown"], "confidence": rep["confidence"],
+                            "parts": rep["confidence_parts"], "labels": rep["labels"]})
+            print(rep["markdown"])
+
         latency_ms = int((time.time() - start) * 1000)
         trace(run_id, repo, issue_number, "completed",
               output_data={"status": "ok", "classification": result},

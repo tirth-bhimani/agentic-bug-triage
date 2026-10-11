@@ -140,7 +140,11 @@ def decide(s):
         if repeated:
             return {
                 **update,
-                **stop("needs-human", "model repeated the same tool call"),
+                **stop(
+                    "ok",
+                    "final answer from gathered evidence",
+                    report={"root_cause": "", "locations": [], "direction": ""},
+                ),
             }
 
     if "final" not in action and s["calls"] >= MAX_CALLS:
@@ -159,7 +163,7 @@ def run_tool(s):
     trace(s["run_id"], s["repo"], s["issue"], f"tool:{name}", input_data=args,
           output_data=result, latency_ms=int((time.time() - t) * 1000))
     n = s["calls"] + 1
-    line = f"{n}. {name}({json.dumps(args)}) -> {json.dumps(result)[:1500]}"
+    line = f"{n}. {name}({json.dumps(args, sort_keys=True)}) -> {json.dumps(result)[:1500]}"
     return {"calls": n, "history": s["history"] + [line]}
 
 
@@ -218,4 +222,4 @@ def run_agent(run_id, repo, issue, title, body, signals, classification):
         {"run_id": run_id, "repo": repo, "issue": issue, "title": title, "body": body,
          "signals": signals, "classification": classification},
         {"recursion_limit": 40})          # backstop; the real limits are the budgets above
-    return final["outcome"]
+    return {**final["outcome"], "history": final["history"]}
