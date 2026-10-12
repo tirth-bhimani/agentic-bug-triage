@@ -166,3 +166,22 @@ def get_issue_comments(owner, repo, issue_number):
         f"/repos/{owner}/{repo}/issues/{issue_number}/comments",
         params={"per_page": 100},
     )
+    
+def get_me():
+    return _get("/user")["login"]
+
+
+def update_comment(owner, repo, comment_id, body):
+    resp = requests.patch(
+        f"{BASE_URL}/repos/{owner}/{repo}/issues/comments/{comment_id}",
+        headers=HEADERS, json={"body": body})
+    resp.raise_for_status()
+    return resp.json()
+
+
+def add_labels(owner, repo, issue_number, labels):
+    resp = requests.post(
+        f"{BASE_URL}/repos/{owner}/{repo}/issues/{issue_number}/labels",
+        headers=HEADERS, json={"labels": labels})
+    resp.raise_for_status()
+    return resp.json()

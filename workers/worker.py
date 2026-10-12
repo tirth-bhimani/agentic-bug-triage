@@ -1,58 +1,34 @@
 import sys
-import time
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import os
+import time
 import uuid
 
+from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential
+
 from config.db import trace
 from workers.job_queue import move_to_dlq
-from agent.classifier import classify_issue
-from agent.signals import extract_signals
-from agent.agent_graph import run_agent
+
+load_dotenv()
+LIVE = os.environ.get("TRIAGE_LIVE") == "1"      # default: dry-run, nothing is posted
+
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def process_issue(repo, issue_number, title, body):
-    run_id = str(uuid.uuid4())
-    start = time.time()
-
+    run_id, start = str(uuid.uuid4()), time.time()
     try:
         trace(run_id, repo, issue_number, "received", input_data={"title": title})
-
-        signals = extract_signals(title, body)
-        trace(run_id, repo, issue_number, "signals", output_data=signals)
-
-        components = []
-        try:
-            from agent.classifier import get_components
-            components = get_components(repo)
-        except Exception:
-            components = ["unknown"]
-        result = classify_issue(title, body, components, signals)
-        trace(run_id, repo, issue_number, "classify", output_data=result)
-        print(f"Processing {repo}#{issue_number}: {title}")
-        
-
-        outcome = run_agent(run_id, repo, issue_number, title, body, signals, result)
-        print(f"Agent: {outcome['status']} ({outcome['reason']}) calls={outcome['calls']}")
-
-        if outcome["status"] == "ok":
-            from agent.report import synthesize
-            from config.db import trace as _t
-            rep = synthesize(run_id, repo, title, outcome, signals, result)
-            _t(run_id, repo, issue_number, "verify", output_data=rep["verifier"])
-            _t(run_id, repo, issue_number, "report",
-               output_data={"markdown": rep["markdown"], "confidence": rep["confidence"],
-                            "parts": rep["confidence_parts"], "labels": rep["labels"]})
-            print(rep["markdown"])
-
-        latency_ms = int((time.time() - start) * 1000)
+        from agent.pipeline import triage_issue        # lazy: keeps heavy imports out of the web server
+        result = triage_issue(run_id, repo, issue_number, title, body, live=LIVE)
         trace(run_id, repo, issue_number, "completed",
-              output_data={"status": "ok", "classification": result},
-              latency_ms=latency_ms)
-        return {"status": "ok", "run_id": run_id, "classification": result}
-
+              output_data={"status": result["status"], "mode": result["mode"], "labels": result["labels"]},
+              latency_ms=int((time.time() - start) * 1000))
+        print(f"{repo}#{issue_number}: {result['status']} [{result['mode']}] labels={result['labels']}")
+        return {"status": "ok", "run_id": run_id}
     except Exception as e:
         trace(run_id, repo, issue_number, "failed", output_data={"error": str(e)})
         move_to_dlq(run_id, repo, issue_number, e)
@@ -60,9 +36,7 @@ def process_issue(repo, issue_number, title, body):
 
 
 if __name__ == "__main__":
-   if __name__ == "__main__":
     from rq import SimpleWorker
     from workers.job_queue import redis_conn, task_queue
 
-    worker = SimpleWorker([task_queue], connection=redis_conn)
-    worker.work()
+    SimpleWorker([task_queue], connection=redis_conn).work()
