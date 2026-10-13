@@ -63,11 +63,36 @@ class State(TypedDict, total=False):
 
 
 def parse_json(text):
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    try:
-        return json.loads(match.group(0)) if match else None
-    except json.JSONDecodeError:
+    if not text:
         return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            pass
+    start_idx = text.find("{")
+    if start_idx != -1:
+        depth = 0
+        for i in range(start_idx, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start_idx:i + 1])
+                    except Exception:
+                        break
+    return None
 
 
 def stop(status, reason, **extra):
@@ -110,7 +135,7 @@ def decide(s):
         history="\n".join(s["history"]) or "(none yet)")
 
     t = time.time()
-    raw = call_llm(prompt, max_tokens=96)
+    raw = call_llm(prompt, max_tokens=300)
     used = (len(prompt) + len(raw)) // 4                   # rough token estimate
     action = parse_json(raw)
     trace(s["run_id"], s["repo"], s["issue"], "agent_step", input_data={"calls": s["calls"]},

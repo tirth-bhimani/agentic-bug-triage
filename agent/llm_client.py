@@ -1,33 +1,51 @@
+import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from huggingface_hub import snapshot_download
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+load_dotenv()
+
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
-MODEL_PATH = ROOT / "models" / "Qwen2.5-7B-Instruct"
+MODEL_ID = os.environ.get("HF_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+model_env = os.environ.get("HF_LOCAL_MODEL_PATH", "models/Qwen2.5-7B-Instruct")
+MODEL_PATH = ROOT / model_env if not Path(model_env).is_absolute() else Path(model_env)
 
 _model = None
 _tokenizer = None
 
 
+def _has_weights(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    return any(path.glob("*.safetensors")) or any(path.glob("*.bin"))
+
+
+def download_model():
+    print(f"Downloading {MODEL_ID} to {MODEL_PATH}...")
+    snapshot_download(
+        repo_id=MODEL_ID,
+        local_dir=MODEL_PATH,
+    )
+
+
 def _get_model():
     global _model, _tokenizer
     if _model is None:
-        if not MODEL_PATH.is_dir():
-            print(f"Downloading {MODEL_ID} to {MODEL_PATH}...")
-            snapshot_download(
-                repo_id=MODEL_ID,
-                local_dir=MODEL_PATH,
+        if not _has_weights(MODEL_PATH):
+            raise RuntimeError(
+                f"Model weights not found for {MODEL_ID} at {MODEL_PATH}. "
+                f"Please download weights first by running: python agent/llm_client.py"
             )
         _tokenizer = AutoTokenizer.from_pretrained(
             MODEL_PATH, local_files_only=True
         )
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        dtype = torch.float16 if device == "cuda" else torch.float32
+        dtype = torch.float16 if device == "cuda" else torch.bfloat16
         _model = AutoModelForCausalLM.from_pretrained(
-            MODEL_PATH, local_files_only=True, torch_dtype=dtype
+            MODEL_PATH, local_files_only=True, dtype=dtype
         ).to(device)
         _model.eval()
     return _model, _tokenizer
@@ -60,4 +78,6 @@ def verified_call():
 
 
 if __name__ == "__main__":
+    if not _has_weights(MODEL_PATH):
+        download_model()
     verified_call()

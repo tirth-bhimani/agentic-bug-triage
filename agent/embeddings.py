@@ -31,10 +31,15 @@ def _get_model():
         device = "cuda" if torch.cuda.is_available() else "cpu"
         dtype = torch.float16 if device == "cuda" else torch.float32
         _model = AutoModel.from_pretrained(
-            MODEL_PATH, local_files_only=True, torch_dtype=dtype
+            MODEL_PATH, local_files_only=True, dtype=dtype
         ).to(device)
         _model.eval()
     return _model, _tokenizer
+
+
+def embedding_dimension():
+    """Return the vector width produced by the configured model."""
+    return _get_model()[0].config.hidden_size
 
 
 def _normalize(vectors):
@@ -67,13 +72,20 @@ def _path(text):
 
 def embed_texts(texts):
     """Return an (n, d) matrix of normalized local-model embeddings."""
+    if not texts:
+        return np.empty((0, embedding_dimension()), dtype=np.float32)
+    dim = embedding_dimension()
     texts = [text[:MAX_CHARS] or " " for text in texts]
     out = [None] * len(texts)
     todo = []
     for index, text in enumerate(texts):
         path = _path(text)
         if path.exists():
-            out[index] = np.load(path)
+            vec = np.load(path)
+            if vec.shape == (dim,):
+                out[index] = vec
+            else:
+                todo.append(index)
         else:
             todo.append(index)
 

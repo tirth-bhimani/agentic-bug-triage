@@ -19,7 +19,7 @@ def enqueue_job(func, *args, **kwargs):
 
 def move_to_dlq(job_id, repo, issue_number, error):
     dead_letter_queue.enqueue(
-        "workers.queue.log_dlq_entry",
+        log_dlq_entry,
         job_id, repo, issue_number, str(error),
     )
 

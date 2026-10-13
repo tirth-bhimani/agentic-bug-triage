@@ -1,3 +1,4 @@
+
 import argparse, ast, json, re, subprocess, sys
 from pathlib import Path
 
@@ -5,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import yaml
-from agent.embeddings import embed_texts
+from agent.embeddings import MODEL_ID, embed_texts, embedding_dimension
 
 CACHE = ROOT / "cache"
 CHROMA_DIR = CACHE / "chroma"
@@ -40,6 +41,17 @@ def index_dir(repo):
     d = CACHE / "index" / slug(repo)
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def collection_needs_rebuild(client, name, dimension):
+    try:
+        col = client.get_collection(name)
+    except Exception:
+        return True
+    if col.count() == 0:
+        return False
+    embeddings = col.get(limit=1, include=["embeddings"]).get("embeddings")
+    return embeddings is None or len(embeddings) == 0 or len(embeddings[0]) != dimension
 
 def default_repo():
     cfg = yaml.safe_load((ROOT / "config" / "repos.yaml").read_text())
@@ -132,6 +144,7 @@ def build_code_index(repo, subdir=None, rebuild=False):
     state = json.loads(sp.read_text()) if sp.exists() else None
     client = chroma_client()
     name = f"code_{slug(repo)}"
+    rebuild = rebuild or collection_needs_rebuild(client, name, embedding_dimension())
     inc = bool(state) and not rebuild and state.get("subdir") == subdir
     if inc and state["sha"] == head:
         return print(f"Code index already at {head[:8]}. Nothing to do.")
@@ -156,7 +169,10 @@ def build_code_index(repo, subdir=None, rebuild=False):
             client.delete_collection(name)
         except Exception:
             pass
-        col = client.create_collection(name)
+        col = client.create_collection(name, metadata={
+            "embedding_model": MODEL_ID,
+            "embedding_dimension": embedding_dimension(),
+        })
 
     print(f"{len(new)} chunks to embed")
     for i in range(0, len(new), 64):
@@ -185,7 +201,10 @@ def build_issue_index(repo, limit=150):
         client.delete_collection(cname)
     except Exception:
         pass
-    col = client.create_collection(cname)
+    col = client.create_collection(cname, metadata={
+        "embedding_model": MODEL_ID,
+        "embedding_dimension": embedding_dimension(),
+    })
 
     issues = list_closed_issues(owner, name, per_page=100, max_pages=limit // 100 + 1)[:limit]
     cp = CACHE / f"issue_comments_{slug(repo)}.json"

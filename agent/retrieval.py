@@ -67,11 +67,18 @@ def lexical_search(repo, title, body, signals, k=20):
 
 
 def dense_search(repo, title, body, k=20):
-    col = _client().get_collection(f"code_{slug(repo)}")
-    q = embed_texts([f"{title}\n{(body or '')[:600]}"])
-    res = col.query(query_embeddings=q.tolist(), n_results=k)
-    # vectors are L2-normalised and Chroma returns squared L2: cos = 1 - d/2
-    return [(i, 1 - d / 2) for i, d in zip(res["ids"][0], res["distances"][0])]
+    try:
+        col = _client().get_collection(f"code_{slug(repo)}")
+        if col.count() == 0:
+            return []
+        q = embed_texts([f"{title}\n{(body or '')[:600]}"])
+        res = col.query(query_embeddings=q.tolist(), n_results=min(k, col.count()))
+        if not res["ids"] or not res["ids"][0]:
+            return []
+        # vectors are L2-normalised and Chroma returns squared L2: cos = 1 - d/2
+        return [(i, 1 - d / 2) for i, d in zip(res["ids"][0], res["distances"][0])]
+    except Exception:
+        return []
 
 
 def rrf(ranked_lists, k=60, weights=None):
@@ -116,17 +123,22 @@ def search_code(title, body, repo, signals=None, mode="fused", k=5, path_boost=0
 # ---------------- issues + duplicates ----------------
 
 def search_similar_issues(title, body, repo, k=5, exclude_number=None):
-    col = _client().get_collection(f"issues_{slug(repo)}")
-    q = embed_texts([f"{title}\n{(body or '')[:800]}"])
-    res = col.query(query_embeddings=q.tolist(), n_results=k + 1)
-    out = []
-    for meta, d in zip(res["metadatas"][0], res["distances"][0]):
-        if exclude_number is not None and meta["number"] == exclude_number:
-            continue
-        out.append({"number": meta["number"], "title": meta["title"],
-                    "similarity": round(1 - d / 2, 4), "resolution": meta["resolution"],
-                    "labels": meta["labels"], "url": meta["url"]})
-    return out[:k]
+    try:
+        col = _client().get_collection(f"issues_{slug(repo)}")
+        if col.count() == 0:
+            return []
+        q = embed_texts([f"{title}\n{(body or '')[:800]}"])
+        res = col.query(query_embeddings=q.tolist(), n_results=min(k + 1, col.count()))
+        out = []
+        for meta, d in zip(res["metadatas"][0], res["distances"][0]):
+            if exclude_number is not None and meta["number"] == exclude_number:
+                continue
+            out.append({"number": meta["number"], "title": meta["title"],
+                        "similarity": round(1 - d / 2, 4), "resolution": meta["resolution"],
+                        "labels": meta["labels"], "url": meta["url"]})
+        return out[:k]
+    except Exception:
+        return []
 
 
 def dup_threshold(repo):

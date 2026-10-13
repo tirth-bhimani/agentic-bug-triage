@@ -10,14 +10,14 @@ from fastapi import FastAPI, Request, HTTPException
 from dotenv import load_dotenv
 
 from workers.idempotency import make_idempotency_key
-from workers.job_queue import enqueue_job
+from workers.job_queue import enqueue_job, redis_conn
 from workers.worker import process_issue
 
 load_dotenv()
 
 app = FastAPI()
 
-WEBHOOK_SECRET = os.environ["WEBHOOK_SECRET"].encode("utf-8")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "").encode("utf-8")
 
 seen_keys = set()  # simple in-memory check; good enough for Day 2
 
@@ -49,9 +49,14 @@ async def webhook(request: Request):
     issue_body = issue.get("body") or ""
 
     key = make_idempotency_key(repo, issue_number, title, issue_body)
-    if key in seen_keys:
-        return {"status": "duplicate", "key": key}
-    seen_keys.add(key)
+    try:
+        is_new = redis_conn.set(f"webhook:seen:{key}", 1, nx=True, ex=86400)
+        if not is_new:
+            return {"status": "duplicate", "key": key}
+    except Exception:
+        if key in seen_keys:
+            return {"status": "duplicate", "key": key}
+        seen_keys.add(key)
 
     enqueue_job(process_issue, repo, issue_number, title, issue_body)
 
